@@ -1,4 +1,4 @@
-CREATE TABLE merchants (
+CREATE TABLE IF NOT EXISTS merchants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   legal_name TEXT NOT NULL,
   registration_number TEXT NOT NULL UNIQUE,
@@ -14,4 +14,3 @@ CREATE TABLE merchants (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-

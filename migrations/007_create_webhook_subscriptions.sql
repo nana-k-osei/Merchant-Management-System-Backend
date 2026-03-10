@@ -1,4 +1,4 @@
-CREATE TABLE webhook_subscriptions (
+CREATE TABLE IF NOT EXISTS webhook_subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   target_url TEXT NOT NULL,
   event_type TEXT NOT NULL,
@@ -9,4 +9,3 @@ CREATE TABLE webhook_subscriptions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-

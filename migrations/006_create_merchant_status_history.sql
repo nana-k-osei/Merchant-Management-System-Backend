@@ -1,4 +1,4 @@
-CREATE TABLE merchant_status_history (
+CREATE TABLE IF NOT EXISTS merchant_status_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
 
@@ -10,4 +10,3 @@ CREATE TABLE merchant_status_history (
 
   notes TEXT
 );
-

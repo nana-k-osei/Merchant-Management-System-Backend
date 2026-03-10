@@ -1,4 +1,4 @@
-CREATE TABLE kyb_documents (
+CREATE TABLE IF NOT EXISTS kyb_documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
 
@@ -15,4 +15,3 @@ CREATE TABLE kyb_documents (
 
   review_notes TEXT
 );
-
