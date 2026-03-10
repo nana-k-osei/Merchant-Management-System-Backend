@@ -1,11 +1,10 @@
 import { Router } from "express";
 
+import { create } from "../controllers/merchantController.js";
+import authMiddleware from "../middleware/authMiddleware.js";
+
 const router = Router();
 
-router.get("/", (req, res) => {
-  res.status(200).json({
-    message: "Welcome to Merchant Routes!"
-  });
-});
+router.post("/", authMiddleware, create);
 
 export default router;
