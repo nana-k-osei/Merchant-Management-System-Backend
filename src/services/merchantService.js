@@ -71,6 +71,7 @@ export async function listMerchants(filters) {
   const conditions = [];
   const values = [];
 
+  // Build filters dynamically so the list endpoint can stay flexible.
   if (filters.status) {
     values.push(filters.status);
     conditions.push(`status = $${values.length}`);
@@ -124,6 +125,7 @@ export async function getMerchantDetails(merchantId) {
     throw createHttpError("Merchant not found.", 404);
   }
 
+  // Load the related KYB documents and status history for the detail view.
   const [documentsResult, statusHistoryResult] = await Promise.all([
     pool.query(
       `
@@ -230,6 +232,7 @@ export async function uploadMerchantDocument(
   const client = await pool.connect();
 
   try {
+    // Keep the document insert and any merchant status update in one transaction.
     await client.query("BEGIN");
 
     const merchantResult = await client.query(
@@ -274,6 +277,7 @@ export async function uploadMerchantDocument(
 
     let merchantStatus = merchant.status;
 
+    // The first valid document upload moves the merchant into DOCUMENTS_SUBMITTED.
     if (
       canTransitionMerchantStatus(
         merchant.status,
@@ -314,6 +318,7 @@ export async function uploadMerchantDocument(
 
     await client.query("COMMIT");
 
+    // Webhooks are sent after commit so delivery issues do not undo DB changes.
     if (merchantStatus !== merchant.status) {
       dispatchMerchantStatusWebhook(merchantId, merchantStatus);
     }
@@ -334,6 +339,7 @@ export async function changeMerchantStatus(merchantId, statusData, operatorId) {
   const client = await pool.connect();
 
   try {
+    // Status updates and history logging must succeed or fail together.
     await client.query("BEGIN");
 
     const merchantResult = await client.query(
@@ -356,6 +362,7 @@ export async function changeMerchantStatus(merchantId, statusData, operatorId) {
       throw createHttpError("Invalid merchant status transition.", 409);
     }
 
+    // A merchant cannot be activated while any document is still pending or rejected.
     if (statusData.status === MERCHANT_STATUSES.ACTIVE) {
       const unresolvedDocumentsResult = await client.query(
         `
@@ -407,6 +414,7 @@ export async function changeMerchantStatus(merchantId, statusData, operatorId) {
 
     await client.query("COMMIT");
 
+    // Notify subscribers only after the merchant status is safely committed.
     dispatchMerchantStatusWebhook(merchantId, statusData.status);
 
     return updateResult.rows[0];

@@ -23,6 +23,7 @@ export async function reviewDocument(documentId, reviewData, operatorId) {
     throw createHttpError("Document not found.", 404);
   }
 
+  // A document can only be reviewed once to keep the audit trail consistent.
   if (document.status !== "PENDING") {
     throw createHttpError("Only pending documents can be reviewed.", 409);
   }

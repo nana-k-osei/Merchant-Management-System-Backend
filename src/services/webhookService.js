@@ -31,6 +31,7 @@ export function getMerchantStatusEventName(status) {
 async function deliverWebhookWithRetries(subscription, payload, eventName) {
   const signature = buildSignature(subscription.secret, payload);
 
+  // Retry a few times so temporary network failures do not drop the event immediately.
   for (let attempt = 1; attempt <= MAX_WEBHOOK_DELIVERY_ATTEMPTS; attempt += 1) {
     try {
       const response = await fetch(subscription.target_url, {
@@ -83,6 +84,7 @@ export async function createWebhookSubscriptions(targetUrl, eventTypes) {
   const secret = randomBytes(32).toString("hex");
   const createdSubscriptions = [];
 
+  // Store one row per event type so dispatch queries stay simple.
   for (const eventType of eventTypes) {
     const result = await pool.query(
       `
@@ -137,6 +139,7 @@ export async function emitMerchantStatusWebhook(merchantId, status) {
 }
 
 export function dispatchMerchantStatusWebhook(merchantId, status) {
+  // Fire-and-forget dispatch keeps the original merchant request responsive.
   setImmediate(() => {
     emitMerchantStatusWebhook(merchantId, status).catch((error) => {
       console.error("Background webhook dispatch failed.", error);
