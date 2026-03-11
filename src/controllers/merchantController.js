@@ -3,14 +3,31 @@ import { z } from "zod";
 import {
   changeMerchantStatus,
   createMerchant,
+  getMerchantDetails,
+  listMerchants,
+  updateMerchant,
   uploadMerchantDocument
 } from "../services/merchantService.js";
+import { MERCHANT_STATUSES } from "../services/merchantStatusRules.js";
 
 const createMerchantSchema = z.object({
   legalName: z.string().trim().min(1),
   registrationNumber: z.string().trim().min(1),
+  category: z.string().trim().min(1),
   country: z.string().trim().min(1),
-  city: z.string().trim().min(1).optional()
+  city: z.string().trim().min(1),
+  contactEmail: z.string().email()
+});
+
+const merchantParamsSchema = z.object({
+  id: z.string().uuid()
+});
+
+const listMerchantsQuerySchema = z.object({
+  status: z.enum(Object.values(MERCHANT_STATUSES)).optional(),
+  city: z.string().trim().min(1).optional(),
+  country: z.string().trim().min(1).optional(),
+  category: z.string().trim().min(1).optional()
 });
 
 const uploadDocumentParamsSchema = z.object({
@@ -41,6 +58,41 @@ const updateMerchantStatusSchema = z
     }
   });
 
+const updateMerchantSchema = z
+  .object({
+    legalName: z.string().trim().min(1).optional(),
+    registrationNumber: z.string().trim().min(1).optional(),
+    category: z.string().trim().min(1).optional(),
+    country: z.string().trim().min(1).optional(),
+    city: z.string().trim().min(1).optional(),
+    contactEmail: z.string().email().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one merchant field must be provided."
+  });
+
+export async function list(req, res, next) {
+  try {
+    const filters = listMerchantsQuerySchema.parse(req.query);
+    const merchants = await listMerchants(filters);
+
+    res.status(200).json(merchants);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getById(req, res, next) {
+  try {
+    const params = merchantParamsSchema.parse(req.params);
+    const merchant = await getMerchantDetails(params.id);
+
+    res.status(200).json(merchant);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function create(req, res, next) {
   try {
     const payload = createMerchantSchema.parse(req.body);
@@ -63,6 +115,18 @@ export async function uploadDocument(req, res, next) {
     );
 
     res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function update(req, res, next) {
+  try {
+    const params = merchantParamsSchema.parse(req.params);
+    const payload = updateMerchantSchema.parse(req.body);
+    const merchant = await updateMerchant(params.id, payload);
+
+    res.status(200).json(merchant);
   } catch (error) {
     next(error);
   }

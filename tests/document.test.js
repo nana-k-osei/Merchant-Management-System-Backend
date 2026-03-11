@@ -13,8 +13,10 @@ const TEST_OPERATOR = {
 const TEST_MERCHANT = {
   legalName: "YQN Pay Documents Ltd",
   registrationNumber: "YQNPAY-DOC-001",
+  category: "Fintech",
   country: "UK",
-  city: "London"
+  city: "London",
+  contactEmail: "documents@yqnpay.com"
 };
 
 const TEST_DOCUMENT = {

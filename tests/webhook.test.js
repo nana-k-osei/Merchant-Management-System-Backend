@@ -15,8 +15,10 @@ const TEST_OPERATOR = {
 const TEST_MERCHANT = {
   legalName: "YQN Pay Webhook Ltd",
   registrationNumber: "YQNPAY-WEBHOOK-001",
+  category: "Fintech",
   country: "UK",
-  city: "London"
+  city: "London",
+  contactEmail: "webhooks@yqnpay.com"
 };
 
 const TEST_DOCUMENT = {

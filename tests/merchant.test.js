@@ -13,8 +13,10 @@ const TEST_OPERATOR = {
 const TEST_MERCHANT = {
   legalName: "YQN Pay Merchant Ltd",
   registrationNumber: "YQNPAY-TEST-001",
+  category: "Fintech",
   country: "UK",
-  city: "London"
+  city: "London",
+  contactEmail: "merchant@yqnpay.com"
 };
 
 const TEST_DOCUMENT = {
@@ -110,14 +112,16 @@ describe("Merchant routes", () => {
     expect(createResponse.body.registration_number).toBe(
       TEST_MERCHANT.registrationNumber
     );
+    expect(createResponse.body.category).toBe(TEST_MERCHANT.category);
     expect(createResponse.body.country).toBe(TEST_MERCHANT.country);
     expect(createResponse.body.city).toBe(TEST_MERCHANT.city);
+    expect(createResponse.body.contact_email).toBe(TEST_MERCHANT.contactEmail);
     expect(createResponse.body.status).toBe("PENDING_KYB");
     expect(createResponse.body.created_by).toBeDefined();
 
     const merchantResult = await pool.query(
       `
-        SELECT registration_number, status, created_by
+        SELECT registration_number, category, contact_email, status, created_by
         FROM merchants
         WHERE registration_number = $1
       `,
@@ -125,10 +129,117 @@ describe("Merchant routes", () => {
     );
 
     expect(merchantResult.rowCount).toBe(1);
+    expect(merchantResult.rows[0].category).toBe(TEST_MERCHANT.category);
+    expect(merchantResult.rows[0].contact_email).toBe(TEST_MERCHANT.contactEmail);
     expect(merchantResult.rows[0].status).toBe("PENDING_KYB");
     expect(merchantResult.rows[0].created_by).toBe(
       createResponse.body.created_by
     );
+  });
+
+  test("GET /merchants returns merchants filtered by status and city", async () => {
+    const accessToken = await createAuthenticatedOperator();
+
+    const createResponse = await request(app)
+      .post("/merchants")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send(TEST_MERCHANT);
+
+    expect(createResponse.status).toBe(201);
+
+    const listResponse = await request(app)
+      .get("/merchants")
+      .query({
+        status: "PENDING_KYB",
+        city: TEST_MERCHANT.city
+      })
+      .set("Authorization", `Bearer ${accessToken}`);
+
+    expect(listResponse.status).toBe(200);
+    expect(Array.isArray(listResponse.body)).toBe(true);
+    expect(listResponse.body).toHaveLength(1);
+    expect(listResponse.body[0].id).toBe(createResponse.body.id);
+    expect(listResponse.body[0].category).toBe(TEST_MERCHANT.category);
+    expect(listResponse.body[0].contact_email).toBe(TEST_MERCHANT.contactEmail);
+  });
+
+  test("GET /merchants/:id returns merchant details with documents and status history", async () => {
+    const accessToken = await createAuthenticatedOperator();
+
+    const createResponse = await request(app)
+      .post("/merchants")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send(TEST_MERCHANT);
+
+    const uploadResponse = await request(app)
+      .post(`/merchants/${createResponse.body.id}/documents`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send(TEST_DOCUMENT);
+
+    expect(uploadResponse.status).toBe(201);
+
+    const detailResponse = await request(app)
+      .get(`/merchants/${createResponse.body.id}`)
+      .set("Authorization", `Bearer ${accessToken}`);
+
+    expect(detailResponse.status).toBe(200);
+    expect(detailResponse.body.merchant.id).toBe(createResponse.body.id);
+    expect(detailResponse.body.merchant.category).toBe(TEST_MERCHANT.category);
+    expect(detailResponse.body.merchant.contact_email).toBe(
+      TEST_MERCHANT.contactEmail
+    );
+    expect(detailResponse.body.documents).toHaveLength(1);
+    expect(detailResponse.body.documents[0].document_type).toBe(
+      TEST_DOCUMENT.documentType
+    );
+    expect(detailResponse.body.statusHistory).toHaveLength(1);
+    expect(detailResponse.body.statusHistory[0].new_status).toBe(
+      "DOCUMENTS_SUBMITTED"
+    );
+  });
+
+  test("PATCH /merchants/:id updates editable merchant fields without changing status", async () => {
+    const accessToken = await createAuthenticatedOperator();
+
+    const createResponse = await request(app)
+      .post("/merchants")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send(TEST_MERCHANT);
+
+    const updateResponse = await request(app)
+      .patch(`/merchants/${createResponse.body.id}`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({
+        legalName: "Updated YQN Pay Merchant Ltd",
+        category: "Payments",
+        city: "Casablanca",
+        contactEmail: "ops@yqnpay.com"
+      });
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.legal_name).toBe("Updated YQN Pay Merchant Ltd");
+    expect(updateResponse.body.category).toBe("Payments");
+    expect(updateResponse.body.city).toBe("Casablanca");
+    expect(updateResponse.body.contact_email).toBe("ops@yqnpay.com");
+    expect(updateResponse.body.status).toBe("PENDING_KYB");
+
+    const merchantResult = await pool.query(
+      `
+        SELECT legal_name, category, city, contact_email, status
+        FROM merchants
+        WHERE id = $1
+      `,
+      [createResponse.body.id]
+    );
+
+    expect(merchantResult.rowCount).toBe(1);
+    expect(merchantResult.rows[0].legal_name).toBe(
+      "Updated YQN Pay Merchant Ltd"
+    );
+    expect(merchantResult.rows[0].category).toBe("Payments");
+    expect(merchantResult.rows[0].city).toBe("Casablanca");
+    expect(merchantResult.rows[0].contact_email).toBe("ops@yqnpay.com");
+    expect(merchantResult.rows[0].status).toBe("PENDING_KYB");
   });
 
   test("POST /merchants/:id/documents uploads a KYB document and updates merchant status once", async () => {
