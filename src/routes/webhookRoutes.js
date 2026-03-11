@@ -1,11 +1,10 @@
 import { Router } from "express";
 
+import { create } from "../controllers/webhookController.js";
+import authMiddleware from "../middleware/authMiddleware.js";
+
 const router = Router();
 
-router.post("/", (req, res) => {
-  res.status(200).json({
-    message: "Welcome to Webhook Routes!"
-  });
-});
+router.post("/", authMiddleware, create);
 
 export default router;

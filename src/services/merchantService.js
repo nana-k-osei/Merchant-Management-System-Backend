@@ -3,6 +3,7 @@ import {
   canTransitionMerchantStatus,
   MERCHANT_STATUSES
 } from "./merchantStatusRules.js";
+import { dispatchMerchantStatusWebhook } from "./webhookService.js";
 
 function createHttpError(message, status) {
   const error = new Error(message);
@@ -149,6 +150,10 @@ export async function uploadMerchantDocument(
 
     await client.query("COMMIT");
 
+    if (merchantStatus !== merchant.status) {
+      dispatchMerchantStatusWebhook(merchantId, merchantStatus);
+    }
+
     return {
       document: documentResult.rows[0],
       merchantStatus
@@ -248,6 +253,8 @@ export async function changeMerchantStatus(merchantId, statusData, operatorId) {
     );
 
     await client.query("COMMIT");
+
+    dispatchMerchantStatusWebhook(merchantId, statusData.status);
 
     return updateResult.rows[0];
   } catch (error) {
