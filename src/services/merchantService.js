@@ -160,3 +160,100 @@ export async function uploadMerchantDocument(
     client.release();
   }
 }
+
+export async function changeMerchantStatus(merchantId, statusData, operatorId) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const merchantResult = await client.query(
+      `
+        SELECT id, status
+        FROM merchants
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [merchantId]
+    );
+
+    const merchant = merchantResult.rows[0];
+
+    if (!merchant) {
+      throw createHttpError("Merchant not found.", 404);
+    }
+
+    if (!canTransitionMerchantStatus(merchant.status, statusData.status)) {
+      throw createHttpError("Invalid merchant status transition.", 409);
+    }
+
+    if (statusData.status === MERCHANT_STATUSES.ACTIVE) {
+      const unresolvedDocumentsResult = await client.query(
+        `
+          SELECT COUNT(*)::INTEGER AS count
+          FROM kyb_documents
+          WHERE merchant_id = $1
+            AND status != 'VERIFIED'
+        `,
+        [merchantId]
+      );
+
+      if (unresolvedDocumentsResult.rows[0].count > 0) {
+        throw createHttpError(
+          "Merchant cannot be activated until all documents are verified.",
+          409
+        );
+      }
+    }
+
+    const updateResult = await client.query(
+      `
+        UPDATE merchants
+        SET status = $2
+        WHERE id = $1
+        RETURNING
+          id,
+          legal_name,
+          registration_number,
+          country,
+          city,
+          status,
+          assigned_reviewer,
+          review_started_at,
+          created_by,
+          created_at,
+          updated_at
+      `,
+      [merchantId, statusData.status]
+    );
+
+    await client.query(
+      `
+        INSERT INTO merchant_status_history (
+          merchant_id,
+          old_status,
+          new_status,
+          changed_by,
+          notes
+        )
+        VALUES ($1, $2, $3, $4, $5)
+      `,
+      [
+        merchantId,
+        merchant.status,
+        statusData.status,
+        operatorId,
+        statusData.notes || null
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return updateResult.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}

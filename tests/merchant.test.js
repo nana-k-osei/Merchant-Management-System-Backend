@@ -51,6 +51,34 @@ async function cleanupTestOperator() {
   ]);
 }
 
+async function createAuthenticatedOperator() {
+  const passwordHash = await bcrypt.hash(TEST_OPERATOR.password, 10);
+
+  await pool.query(
+    `
+      INSERT INTO operators (
+        email,
+        password_hash,
+        role,
+        is_active,
+        failed_login_attempts,
+        locked_until
+      )
+      VALUES ($1, $2, $3, TRUE, 0, NULL)
+    `,
+    [TEST_OPERATOR.email, passwordHash, TEST_OPERATOR.role]
+  );
+
+  const loginResponse = await request(app).post("/auth/login").send({
+    email: TEST_OPERATOR.email,
+    password: TEST_OPERATOR.password
+  });
+
+  expect(loginResponse.status).toBe(200);
+
+  return loginResponse.body.accessToken;
+}
+
 describe("Merchant routes", () => {
   beforeEach(async () => {
     // Reset merchant and operator rows so the test always starts clean.
@@ -70,34 +98,11 @@ describe("Merchant routes", () => {
   });
 
   test("POST /merchants creates a merchant for an authenticated operator", async () => {
-    const passwordHash = await bcrypt.hash(TEST_OPERATOR.password, 10);
-
-    await pool.query(
-      `
-        INSERT INTO operators (
-          email,
-          password_hash,
-          role,
-          is_active,
-          failed_login_attempts,
-          locked_until
-        )
-        VALUES ($1, $2, $3, TRUE, 0, NULL)
-        RETURNING id
-      `,
-      [TEST_OPERATOR.email, passwordHash, TEST_OPERATOR.role]
-    );
-
-    const loginResponse = await request(app).post("/auth/login").send({
-      email: TEST_OPERATOR.email,
-      password: TEST_OPERATOR.password
-    });
-
-    expect(loginResponse.status).toBe(200);
+    const accessToken = await createAuthenticatedOperator();
 
     const createResponse = await request(app)
       .post("/merchants")
-      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send(TEST_MERCHANT);
 
     expect(createResponse.status).toBe(201);
@@ -127,40 +132,18 @@ describe("Merchant routes", () => {
   });
 
   test("POST /merchants/:id/documents uploads a KYB document and updates merchant status once", async () => {
-    const passwordHash = await bcrypt.hash(TEST_OPERATOR.password, 10);
-
-    await pool.query(
-      `
-        INSERT INTO operators (
-          email,
-          password_hash,
-          role,
-          is_active,
-          failed_login_attempts,
-          locked_until
-        )
-        VALUES ($1, $2, $3, TRUE, 0, NULL)
-      `,
-      [TEST_OPERATOR.email, passwordHash, TEST_OPERATOR.role]
-    );
-
-    const loginResponse = await request(app).post("/auth/login").send({
-      email: TEST_OPERATOR.email,
-      password: TEST_OPERATOR.password
-    });
-
-    expect(loginResponse.status).toBe(200);
+    const accessToken = await createAuthenticatedOperator();
 
     const createResponse = await request(app)
       .post("/merchants")
-      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send(TEST_MERCHANT);
 
     expect(createResponse.status).toBe(201);
 
     const firstUploadResponse = await request(app)
       .post(`/merchants/${createResponse.body.id}/documents`)
-      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send(TEST_DOCUMENT);
 
     expect(firstUploadResponse.status).toBe(201);
@@ -173,7 +156,7 @@ describe("Merchant routes", () => {
 
     const secondUploadResponse = await request(app)
       .post(`/merchants/${createResponse.body.id}/documents`)
-      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send(SECOND_TEST_DOCUMENT);
 
     expect(secondUploadResponse.status).toBe(201);
@@ -225,5 +208,123 @@ describe("Merchant routes", () => {
     expect(historyResult.rows[0].new_status).toBe("DOCUMENTS_SUBMITTED");
     expect(historyResult.rows[0].changed_by).toBe(createResponse.body.created_by);
     expect(historyResult.rows[0].notes).toBe("Merchant documents submitted.");
+  });
+
+  test("PATCH /merchants/:id/status moves a reviewed merchant to ACTIVE", async () => {
+    const accessToken = await createAuthenticatedOperator();
+
+    const createResponse = await request(app)
+      .post("/merchants")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send(TEST_MERCHANT);
+
+    const uploadResponse = await request(app)
+      .post(`/merchants/${createResponse.body.id}/documents`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send(TEST_DOCUMENT);
+
+    const reviewResponse = await request(app)
+      .patch(`/documents/${uploadResponse.body.document.id}`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({
+        status: "VERIFIED"
+      });
+
+    expect(reviewResponse.status).toBe(200);
+
+    const moveToUnderReviewResponse = await request(app)
+      .patch(`/merchants/${createResponse.body.id}/status`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({
+        status: "UNDER_REVIEW"
+      });
+
+    expect(moveToUnderReviewResponse.status).toBe(200);
+    expect(moveToUnderReviewResponse.body.status).toBe("UNDER_REVIEW");
+
+    const activateResponse = await request(app)
+      .patch(`/merchants/${createResponse.body.id}/status`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({
+        status: "ACTIVE"
+      });
+
+    expect(activateResponse.status).toBe(200);
+    expect(activateResponse.body.status).toBe("ACTIVE");
+
+    const merchantResult = await pool.query(
+      `
+        SELECT status
+        FROM merchants
+        WHERE id = $1
+      `,
+      [createResponse.body.id]
+    );
+
+    expect(merchantResult.rowCount).toBe(1);
+    expect(merchantResult.rows[0].status).toBe("ACTIVE");
+
+    const historyResult = await pool.query(
+      `
+        SELECT old_status, new_status
+        FROM merchant_status_history
+        WHERE merchant_id = $1
+        ORDER BY changed_at ASC
+      `,
+      [createResponse.body.id]
+    );
+
+    expect(historyResult.rowCount).toBe(3);
+    expect(historyResult.rows[1].old_status).toBe("DOCUMENTS_SUBMITTED");
+    expect(historyResult.rows[1].new_status).toBe("UNDER_REVIEW");
+    expect(historyResult.rows[2].old_status).toBe("UNDER_REVIEW");
+    expect(historyResult.rows[2].new_status).toBe("ACTIVE");
+  });
+
+  test("PATCH /merchants/:id/status blocks activation when documents are not all verified", async () => {
+    const accessToken = await createAuthenticatedOperator();
+
+    const createResponse = await request(app)
+      .post("/merchants")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send(TEST_MERCHANT);
+
+    await request(app)
+      .post(`/merchants/${createResponse.body.id}/documents`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send(TEST_DOCUMENT);
+
+    const moveToUnderReviewResponse = await request(app)
+      .patch(`/merchants/${createResponse.body.id}/status`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({
+        status: "UNDER_REVIEW"
+      });
+
+    expect(moveToUnderReviewResponse.status).toBe(200);
+
+    const activateResponse = await request(app)
+      .patch(`/merchants/${createResponse.body.id}/status`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({
+        status: "ACTIVE"
+      });
+
+    expect(activateResponse.status).toBe(409);
+    expect(activateResponse.body.message).toBe(
+      "Merchant cannot be activated until all documents are verified."
+    );
+
+    const merchantResult = await pool.query(
+      `
+        SELECT status
+        FROM merchants
+        WHERE id = $1
+      `,
+      [createResponse.body.id]
+    );
+
+    expect(merchantResult.rowCount).toBe(1);
+    expect(merchantResult.rows[0].status).toBe("UNDER_REVIEW");
   });
 });
