@@ -1,0 +1,35 @@
+export const MERCHANT_STATUSES = {
+  PENDING_KYB: "PENDING_KYB",
+  DOCUMENTS_SUBMITTED: "DOCUMENTS_SUBMITTED",
+  UNDER_REVIEW: "UNDER_REVIEW",
+  ACTIVE: "ACTIVE",
+  REJECTED: "REJECTED",
+  SUSPENDED: "SUSPENDED"
+};
+
+const allowedMerchantStatusTransitions = {
+  [MERCHANT_STATUSES.PENDING_KYB]: [
+    MERCHANT_STATUSES.DOCUMENTS_SUBMITTED,
+    MERCHANT_STATUSES.REJECTED
+  ],
+  [MERCHANT_STATUSES.DOCUMENTS_SUBMITTED]: [
+    MERCHANT_STATUSES.UNDER_REVIEW,
+    MERCHANT_STATUSES.REJECTED
+  ],
+  [MERCHANT_STATUSES.UNDER_REVIEW]: [
+    MERCHANT_STATUSES.ACTIVE,
+    MERCHANT_STATUSES.REJECTED,
+    MERCHANT_STATUSES.SUSPENDED
+  ],
+  [MERCHANT_STATUSES.ACTIVE]: [MERCHANT_STATUSES.SUSPENDED],
+  [MERCHANT_STATUSES.REJECTED]: [MERCHANT_STATUSES.PENDING_KYB],
+  [MERCHANT_STATUSES.SUSPENDED]: [MERCHANT_STATUSES.ACTIVE]
+};
+
+export function getAllowedMerchantStatusTransitions(currentStatus) {
+  return allowedMerchantStatusTransitions[currentStatus] || [];
+}
+
+export function canTransitionMerchantStatus(currentStatus, nextStatus) {
+  return getAllowedMerchantStatusTransitions(currentStatus).includes(nextStatus);
+}

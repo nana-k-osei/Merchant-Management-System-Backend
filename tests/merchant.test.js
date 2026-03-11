@@ -17,6 +17,16 @@ const TEST_MERCHANT = {
   city: "London"
 };
 
+const TEST_DOCUMENT = {
+  documentType: "certificate_of_incorporation",
+  fileUrl: "https://storage.example.com/doc-001.pdf"
+};
+
+const SECOND_TEST_DOCUMENT = {
+  documentType: "proof_of_address",
+  fileUrl: "https://storage.example.com/doc-002.pdf"
+};
+
 async function cleanupTestMerchant() {
   await pool.query("DELETE FROM merchants WHERE registration_number = $1", [
     TEST_MERCHANT.registrationNumber
@@ -114,5 +124,106 @@ describe("Merchant routes", () => {
     expect(merchantResult.rows[0].created_by).toBe(
       createResponse.body.created_by
     );
+  });
+
+  test("POST /merchants/:id/documents uploads a KYB document and updates merchant status once", async () => {
+    const passwordHash = await bcrypt.hash(TEST_OPERATOR.password, 10);
+
+    await pool.query(
+      `
+        INSERT INTO operators (
+          email,
+          password_hash,
+          role,
+          is_active,
+          failed_login_attempts,
+          locked_until
+        )
+        VALUES ($1, $2, $3, TRUE, 0, NULL)
+      `,
+      [TEST_OPERATOR.email, passwordHash, TEST_OPERATOR.role]
+    );
+
+    const loginResponse = await request(app).post("/auth/login").send({
+      email: TEST_OPERATOR.email,
+      password: TEST_OPERATOR.password
+    });
+
+    expect(loginResponse.status).toBe(200);
+
+    const createResponse = await request(app)
+      .post("/merchants")
+      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`)
+      .send(TEST_MERCHANT);
+
+    expect(createResponse.status).toBe(201);
+
+    const firstUploadResponse = await request(app)
+      .post(`/merchants/${createResponse.body.id}/documents`)
+      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`)
+      .send(TEST_DOCUMENT);
+
+    expect(firstUploadResponse.status).toBe(201);
+    expect(firstUploadResponse.body.document.document_type).toBe(
+      TEST_DOCUMENT.documentType
+    );
+    expect(firstUploadResponse.body.document.file_url).toBe(TEST_DOCUMENT.fileUrl);
+    expect(firstUploadResponse.body.document.status).toBe("PENDING");
+    expect(firstUploadResponse.body.merchantStatus).toBe("DOCUMENTS_SUBMITTED");
+
+    const secondUploadResponse = await request(app)
+      .post(`/merchants/${createResponse.body.id}/documents`)
+      .set("Authorization", `Bearer ${loginResponse.body.accessToken}`)
+      .send(SECOND_TEST_DOCUMENT);
+
+    expect(secondUploadResponse.status).toBe(201);
+    expect(secondUploadResponse.body.document.document_type).toBe(
+      SECOND_TEST_DOCUMENT.documentType
+    );
+    expect(secondUploadResponse.body.merchantStatus).toBe("DOCUMENTS_SUBMITTED");
+
+    const documentResult = await pool.query(
+      `
+        SELECT document_type, file_url, status
+        FROM kyb_documents
+        WHERE merchant_id = $1
+        ORDER BY uploaded_at ASC
+      `,
+      [createResponse.body.id]
+    );
+
+    expect(documentResult.rowCount).toBe(2);
+    expect(documentResult.rows[0].document_type).toBe(TEST_DOCUMENT.documentType);
+    expect(documentResult.rows[0].status).toBe("PENDING");
+    expect(documentResult.rows[1].document_type).toBe(
+      SECOND_TEST_DOCUMENT.documentType
+    );
+
+    const merchantResult = await pool.query(
+      `
+        SELECT status
+        FROM merchants
+        WHERE id = $1
+      `,
+      [createResponse.body.id]
+    );
+
+    expect(merchantResult.rowCount).toBe(1);
+    expect(merchantResult.rows[0].status).toBe("DOCUMENTS_SUBMITTED");
+
+    const historyResult = await pool.query(
+      `
+        SELECT old_status, new_status, changed_by, notes
+        FROM merchant_status_history
+        WHERE merchant_id = $1
+      `,
+      [createResponse.body.id]
+    );
+
+    expect(historyResult.rowCount).toBe(1);
+    expect(historyResult.rows[0].old_status).toBe("PENDING_KYB");
+    expect(historyResult.rows[0].new_status).toBe("DOCUMENTS_SUBMITTED");
+    expect(historyResult.rows[0].changed_by).toBe(createResponse.body.created_by);
+    expect(historyResult.rows[0].notes).toBe("Merchant documents submitted.");
   });
 });
