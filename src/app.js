@@ -2,6 +2,7 @@ import express from "express";
 
 import pool from "./db/index.js";
 import authRoutes from "./routes/authRoutes.js";
+import documentRoutes from "./routes/documentRoutes.js";
 import merchantRoutes from "./routes/merchantRoutes.js";
 import webhookRoutes from "./routes/webhookRoutes.js";
 import errorHandler from "./middleware/errorHandler.js";
@@ -25,6 +26,7 @@ app.get("/db-test", async (req, res, next) => {
 });
 
 app.use("/auth", authRoutes);
+app.use("/documents", documentRoutes);
 app.use("/merchants", merchantRoutes);
 app.use("/webhooks", webhookRoutes);
 
